@@ -36,6 +36,12 @@
   .choice .spk { font-size: 40px; }
   .choice.correct { border-color: #5fcf6a; background: #e9ffe9; }
   .choice.wrong { border-color: #ff5a5a; background: #ffe9e9; }
+  .choice.selected { border-color: #ffd34f; }
+  #checkBtn {
+    font: inherit; font-weight: 700; font-size: 18px; color: #333; background: #fff;
+    border: none; border-radius: 16px; padding: 10px 26px; cursor: pointer;
+  }
+  #checkBtn:disabled { opacity: 0.4; cursor: default; }
   #overlay {
     position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
     background: rgba(0,0,0,0.4); flex-direction: column; gap: 14px;
@@ -64,6 +70,7 @@
     <div id="prompt"></div>
     <div id="replayWrap"></div>
     <div class="choices" id="choices"></div>
+    <div id="checkRow"></div>
   </div>
 
   <div id="overlay">
@@ -77,9 +84,10 @@
 
 <script>
 const $ = s => document.querySelector(s);
-const stage = $('#stage'), promptEl = $('#prompt'), choicesEl = $('#choices'), replayWrap = $('#replayWrap');
+const stage = $('#stage'), promptEl = $('#prompt'), choicesEl = $('#choices'), replayWrap = $('#replayWrap'), checkRow = $('#checkRow');
 const overlay = $('#overlay'), statusEl = $('#status');
 let score = 0, streak = 0, audioCtx, master, busy = false, roundType = 'hear';
+let selectedEl = null, selectedType = null;
 
 // ---------- sound synthesis ----------
 
@@ -178,11 +186,12 @@ function drawPicture(canvas, id) {
 
 function nextRound() {
   busy = false;
+  selectedEl = null; selectedType = null;
   roundType = Math.random() < 0.5 ? 'hear' : 'see';
   const order = shuffle(TYPES.slice());
   const target = order[0];
 
-  choicesEl.innerHTML = '';
+  choicesEl.innerHTML = ''; checkRow.innerHTML = '';
   if (roundType === 'hear') {
     promptEl.textContent = 'Which picture matches the sound?';
     replayWrap.innerHTML = `<button class="replay" id="replayBtn">🔊</button>`;
@@ -192,13 +201,13 @@ function nextRound() {
       el.className = 'choice';
       el.dataset.id = t.id;
       el.innerHTML = `<canvas></canvas>`;
-      el.onclick = () => choose(el, t, target);
+      el.onclick = () => { if (!busy) choose(el, t, target); };
       choicesEl.appendChild(el);
       drawPicture(el.querySelector('canvas'), t.id);
     });
     setTimeout(() => target.play(), 300);
   } else {
-    promptEl.textContent = 'Which sound matches this picture?';
+    promptEl.textContent = 'Listen to each one, then pick the sound that matches this picture.';
     const pic = document.createElement('canvas');
     pic.style.width = '220px'; pic.style.height = '90px'; pic.style.background = '#0d1b2a'; pic.style.borderRadius = '10px';
     replayWrap.innerHTML = ''; replayWrap.appendChild(pic);
@@ -208,9 +217,18 @@ function nextRound() {
       el.className = 'choice';
       el.dataset.id = t.id;
       el.innerHTML = `<div class="spk">🔊</div>`;
-      el.onclick = () => choose(el, t, target);
+      el.onclick = () => {
+        if (busy) return;
+        t.play();
+        if (selectedEl) selectedEl.classList.remove('selected');
+        selectedEl = el; selectedType = t;
+        el.classList.add('selected');
+        $('#checkBtn').disabled = false;
+      };
       choicesEl.appendChild(el);
     });
+    checkRow.innerHTML = `<button id="checkBtn" disabled>✓ Check my answer</button>`;
+    $('#checkBtn').onclick = () => { if (selectedType) choose(selectedEl, selectedType, target); };
   }
   statusEl.textContent = '';
 }
@@ -219,23 +237,16 @@ function choose(el, picked, target) {
   if (busy) return;
   busy = true;
   const ok = picked.id === target.id;
-  const settle = () => {
-    el.classList.add(ok ? 'correct' : 'wrong');
-    if (!ok) {
-      [...choicesEl.children].forEach(c => { if (c.dataset.id === target.id) c.classList.add('correct'); });
-    }
-    playDing(ok);
-    if (ok) { score++; streak++; burst(); } else { streak = 0; }
-    $('#score').textContent = score; $('#streak').textContent = streak;
-    statusEl.textContent = ok ? 'Yes! 🎉' : 'Close — listen again next time!';
-    setTimeout(nextRound, 1300);
-  };
-  if (roundType === 'see') {
-    picked.play();
-    setTimeout(settle, 550);
-  } else {
-    settle();
+  el.classList.remove('selected');
+  el.classList.add(ok ? 'correct' : 'wrong');
+  if (!ok) {
+    [...choicesEl.children].forEach(c => { if (c.dataset.id === target.id) c.classList.add('correct'); });
   }
+  playDing(ok);
+  if (ok) { score++; streak++; burst(); } else { streak = 0; }
+  $('#score').textContent = score; $('#streak').textContent = streak;
+  statusEl.textContent = ok ? 'Yes! 🎉' : 'Close — listen again next time!';
+  setTimeout(nextRound, 1300);
 }
 
 function shuffle(a) {
