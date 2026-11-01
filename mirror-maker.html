@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mirror Maker — Becca's Arcade</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; padding: 20px; display: flex; flex-direction: column;
+    align-items: center; gap: 14px; font: 18px/1.4 system-ui, "Segoe UI", sans-serif;
+    background: linear-gradient(135deg, #7c6bff, #4fd1ff 55%, #5fcf6a);
+    color: #fff; text-align: center; overflow-x: hidden;
+  }
+  a.back { position: absolute; top: 16px; left: 16px; color: #fff; text-decoration: none; font-weight: 700; font-size: 16px; }
+  h1 { margin: 6px 0 0; font-size: 36px; text-shadow: 0 3px 0 rgba(0,0,0,0.15); }
+  #status { font-size: 17px; opacity: 0.95; }
+  .bar { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; align-items: center; }
+  .bar button {
+    font: inherit; font-weight: 700; font-size: 15px; color: #fff; background: rgba(255,255,255,0.22);
+    border: 3px solid rgba(255,255,255,0.55); border-radius: 14px; padding: 9px 16px; cursor: pointer;
+  }
+  .bar button.active { background: rgba(255,255,255,0.55); }
+  .canvasWrap { position: relative; width: min(480px, 92vw); aspect-ratio: 1; }
+  canvas {
+    position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 20px; touch-action: none;
+  }
+  #bg { background: #fff; border: 5px solid rgba(255,255,255,0.7); }
+  #fg { cursor: crosshair; }
+  .swatches { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; max-width: 480px; }
+  .swatch {
+    width: 38px; height: 38px; border-radius: 50%; border: 4px solid rgba(255,255,255,0.4);
+    cursor: pointer; box-shadow: 0 3px 0 rgba(0,0,0,0.15);
+  }
+  .swatch.active { border-color: #fff; transform: scale(1.12); }
+  .note { font-size: 13px; opacity: 0.85; max-width: 480px; }
+</style>
+</head>
+<body>
+  <a class="back" href="index.html">← Arcade</a>
+  <h1>🪞 Mirror Maker</h1>
+  <div id="status">Draw on one side — watch it appear everywhere!</div>
+
+  <div class="bar">
+    <button id="sideBtn" class="active">↔ Side-to-Side</button>
+    <button id="fourBtn">✛ 4-Way</button>
+    <button id="bigBtn" class="active">🖌️ Big</button>
+    <button id="smallBtn">🖊️ Small</button>
+    <button id="clearBtn">🧹 Clear</button>
+    <button id="saveBtn">💾 Save</button>
+  </div>
+
+  <div class="canvasWrap">
+    <canvas id="bg"></canvas>
+    <canvas id="fg"></canvas>
+  </div>
+
+  <div class="swatches" id="swatches"></div>
+  <div class="note">Nothing is saved automatically — tap 💾 Save to download a picture.</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const wrap = $('.canvasWrap'), bg = $('#bg'), fg = $('#fg');
+const bgCtx = bg.getContext('2d'), fgCtx = fg.getContext('2d');
+
+const COLORS = ['#ff5a5a','#ff9a4a','#ffd34f','#5fcf6a','#4fd1ff','#4f7cff','#7c6bff','#ff6fb0'];
+let mode = 'side';     // 'side' | 'four'
+let brush = 16;        // px
+let color = COLORS[5];
+let drawing = false, lastX = 0, lastY = 0;
+let w = 0, h = 0, cx = 0, cy = 0;
+
+function fit(c) {
+  const r = wrap.getBoundingClientRect(), d = devicePixelRatio || 1;
+  const cw = Math.round(r.width * d), ch = Math.round(r.height * d);
+  if (c.width !== cw || c.height !== ch) { c.width = cw; c.height = ch; }
+}
+
+function layout() {
+  fit(bg); fit(fg);
+  w = bg.width; h = bg.height; cx = w / 2; cy = h / 2;
+  drawGuides();
+}
+
+function drawGuides() {
+  bgCtx.clearRect(0, 0, w, h);
+  bgCtx.fillStyle = '#ffffff'; bgCtx.fillRect(0, 0, w, h);
+  bgCtx.strokeStyle = 'rgba(124,107,255,0.25)';
+  bgCtx.lineWidth = Math.max(2, w * 0.004);
+  bgCtx.setLineDash([w * 0.015, w * 0.012]);
+  bgCtx.beginPath(); bgCtx.moveTo(cx, 0); bgCtx.lineTo(cx, h); bgCtx.stroke();
+  if (mode === 'four') {
+    bgCtx.beginPath(); bgCtx.moveTo(0, cy); bgCtx.lineTo(w, cy); bgCtx.stroke();
+  }
+  bgCtx.setLineDash([]);
+}
+
+function mirrorPoints(x, y) {
+  const mx = cx * 2 - x, my = cy * 2 - y;
+  if (mode === 'side') return [[x, y], [mx, y]];
+  return [[x, y], [mx, y], [x, my], [mx, my]];
+}
+
+function strokeAt(fromX, fromY, toX, toY) {
+  const from = mirrorPoints(fromX, fromY), to = mirrorPoints(toX, toY);
+  fgCtx.strokeStyle = color; fgCtx.fillStyle = color;
+  fgCtx.lineWidth = brush; fgCtx.lineCap = 'round'; fgCtx.lineJoin = 'round';
+  for (let i = 0; i < to.length; i++) {
+    fgCtx.beginPath();
+    fgCtx.moveTo(from[i][0], from[i][1]);
+    fgCtx.lineTo(to[i][0], to[i][1]);
+    fgCtx.stroke();
+  }
+}
+
+function dotAt(x, y) {
+  const pts = mirrorPoints(x, y);
+  fgCtx.fillStyle = color;
+  pts.forEach(([px, py]) => {
+    fgCtx.beginPath();
+    fgCtx.arc(px, py, brush / 2, 0, Math.PI * 2);
+    fgCtx.fill();
+  });
+}
+
+function toCanvasXY(e) {
+  const r = fg.getBoundingClientRect(), d = devicePixelRatio || 1;
+  return [(e.clientX - r.left) * d, (e.clientY - r.top) * d];
+}
+
+fg.addEventListener('pointerdown', e => {
+  drawing = true;
+  fg.setPointerCapture(e.pointerId);
+  [lastX, lastY] = toCanvasXY(e);
+  dotAt(lastX, lastY);
+});
+fg.addEventListener('pointermove', e => {
+  if (!drawing) return;
+  const [x, y] = toCanvasXY(e);
+  strokeAt(lastX, lastY, x, y);
+  lastX = x; lastY = y;
+});
+['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => fg.addEventListener(ev, () => drawing = false));
+
+function setMode(m) {
+  mode = m;
+  $('#sideBtn').classList.toggle('active', m === 'side');
+  $('#fourBtn').classList.toggle('active', m === 'four');
+  fgCtx.clearRect(0, 0, w, h);
+  drawGuides();
+}
+$('#sideBtn').onclick = () => setMode('side');
+$('#fourBtn').onclick = () => setMode('four');
+
+$('#bigBtn').onclick = () => { brush = 16; $('#bigBtn').classList.add('active'); $('#smallBtn').classList.remove('active'); };
+$('#smallBtn').onclick = () => { brush = 7; $('#smallBtn').classList.add('active'); $('#bigBtn').classList.remove('active'); };
+
+$('#clearBtn').onclick = () => fgCtx.clearRect(0, 0, w, h);
+
+$('#saveBtn').onclick = () => {
+  const out = document.createElement('canvas');
+  out.width = w; out.height = h;
+  const octx = out.getContext('2d');
+  octx.drawImage(bg, 0, 0); octx.drawImage(fg, 0, 0);
+  const a = document.createElement('a');
+  a.download = 'mirror-maker.png';
+  a.href = out.toDataURL('image/png');
+  a.click();
+};
+
+const swEl = $('#swatches');
+COLORS.forEach((c, i) => {
+  const el = document.createElement('div');
+  el.className = 'swatch' + (i === 5 ? ' active' : '');
+  el.style.background = c;
+  el.onclick = () => { color = c; [...swEl.children].forEach(s => s.classList.remove('active')); el.classList.add('active'); };
+  swEl.appendChild(el);
+});
+
+window.addEventListener('resize', () => {
+  const snap = document.createElement('canvas'); snap.width = w; snap.height = h;
+  snap.getContext('2d').drawImage(fg, 0, 0);
+  layout();
+  fgCtx.drawImage(snap, 0, 0, snap.width, snap.height, 0, 0, w, h);
+});
+
+layout();
+</script>
+</body>
+</html>
