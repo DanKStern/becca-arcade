@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mix-It Lab — Becca's Arcade</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; padding: 20px; display: flex; flex-direction: column;
+    align-items: center; gap: 14px; font: 18px/1.4 system-ui, "Segoe UI", sans-serif;
+    background: linear-gradient(135deg, #ff6fb0, #ffd34f 55%, #5fcf6a);
+    color: #fff; text-align: center; overflow-x: hidden;
+  }
+  a.back { position: absolute; top: 16px; left: 16px; color: #fff; text-decoration: none; font-weight: 700; font-size: 16px; }
+  h1 { margin: 6px 0 0; font-size: 36px; text-shadow: 0 3px 0 rgba(0,0,0,0.15); }
+  #status { font-size: 19px; min-height: 26px; font-weight: 600; }
+  .bar { display: flex; gap: 18px; font-weight: 700; font-size: 18px; }
+  .stage {
+    width: min(420px, 92vw); background: rgba(255,255,255,0.14); border: 4px solid rgba(255,255,255,0.5);
+    border-radius: 24px; padding: 24px; display: flex; flex-direction: column; align-items: center; gap: 20px;
+  }
+  .targetLabel { font-size: 16px; opacity: 0.9; }
+  #target {
+    width: 72px; height: 72px; border-radius: 50%; border: 5px solid #fff;
+    box-shadow: 0 4px 0 rgba(0,0,0,0.15);
+  }
+  #bowl {
+    width: 140px; height: 140px; border-radius: 50% 50% 46% 46% / 55% 55% 45% 45%;
+    border: 6px solid rgba(255,255,255,0.8); background: #fff;
+    box-shadow: inset 0 8px 16px rgba(0,0,0,0.15), 0 6px 0 rgba(0,0,0,0.15);
+    transition: background-color 0.25s;
+  }
+  .blobs { display: flex; gap: 20px; }
+  .blob {
+    width: 72px; height: 72px; border-radius: 50%; cursor: pointer; border: 5px solid rgba(255,255,255,0.5);
+    box-shadow: 0 6px 0 rgba(0,0,0,0.15); transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+  }
+  .blob.active { transform: scale(1.15) translateY(-6px); border-color: #fff; box-shadow: 0 10px 14px rgba(0,0,0,0.25); }
+  .resetBtn {
+    font: inherit; font-weight: 700; font-size: 15px; color: #fff; background: rgba(255,255,255,0.22);
+    border: 3px solid rgba(255,255,255,0.55); border-radius: 14px; padding: 8px 16px; cursor: pointer;
+  }
+  .confetti { position: fixed; top: -40px; font-size: 28px; animation: fall linear forwards; pointer-events: none; }
+  @keyframes fall { to { transform: translateY(110vh) rotate(360deg); opacity: 0.4; } }
+</style>
+</head>
+<body>
+  <a class="back" href="index.html">← Arcade</a>
+  <h1>🎨 Mix-It Lab</h1>
+  <div id="status">Tap the colors to mix them in the bowl!</div>
+  <div class="bar"><span>⭐ Score: <span id="score">0</span></span><span>🔥 Streak: <span id="streak">0</span></span></div>
+
+  <div class="stage">
+    <div class="targetLabel">Make this color!</div>
+    <div id="target"></div>
+    <div id="bowl"></div>
+    <div class="blobs" id="blobs"></div>
+    <button class="resetBtn" id="resetBtn">🔄 Reset Bowl</button>
+  </div>
+
+<script>
+const $ = s => document.querySelector(s);
+const bowl = $('#bowl'), targetEl = $('#target'), blobsEl = $('#blobs'), statusEl = $('#status');
+let score = 0, streak = 0, audioCtx, master;
+let active = { r: false, y: false, b: false };
+let targetKey = null;
+
+// ---------- RYB "paint" color mixing ----------
+
+const CORNERS = {
+  w: [1, 1, 1], r: [1, 0, 0], y: [1, 1, 0], b: [0.163, 0.373, 0.6],
+  o: [1, 0.5, 0], v: [0.569, 0.188, 0.635], g: [0.0, 0.66, 0.2], k: [0.2, 0.094, 0.0],
+};
+
+function ryBlend(r, y, b) {
+  const rf = r ? 1 : 0, yf = y ? 1 : 0, bf = b ? 1 : 0;
+  const out = [0, 0, 0];
+  for (let i = 0; i < 3; i++) {
+    out[i] = CORNERS.w[i] * (1 - rf) * (1 - yf) * (1 - bf)
+           + CORNERS.r[i] * rf * (1 - yf) * (1 - bf)
+           + CORNERS.y[i] * (1 - rf) * yf * (1 - bf)
+           + CORNERS.b[i] * (1 - rf) * (1 - yf) * bf
+           + CORNERS.o[i] * rf * yf * (1 - bf)
+           + CORNERS.v[i] * rf * (1 - yf) * bf
+           + CORNERS.g[i] * (1 - rf) * yf * bf
+           + CORNERS.k[i] * rf * yf * bf;
+  }
+  return out.map(v => Math.round(v * 255));
+}
+
+function toCss([r, g, b]) { return `rgb(${r},${g},${b})`; }
+
+const TARGETS = [
+  { key: 'r', combo: { r: true, y: false, b: false } },
+  { key: 'y', combo: { r: false, y: true, b: false } },
+  { key: 'b', combo: { r: false, y: false, b: true } },
+  { key: 'o', combo: { r: true, y: true, b: false } },
+  { key: 'g', combo: { r: false, y: true, b: true } },
+  { key: 'v', combo: { r: true, y: false, b: true } },
+  { key: 'k', combo: { r: true, y: true, b: true } },
+];
+
+// ---------- audio ----------
+
+function playDing(ok) {
+  const t0 = audioCtx.currentTime + 0.02;
+  const o = audioCtx.createOscillator(); o.type = 'sine';
+  o.frequency.value = ok ? 880 : 180;
+  const g = audioCtx.createGain();
+  g.gain.setValueAtTime(0.25, t0);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + (ok ? 0.4 : 0.3));
+  o.connect(g); g.connect(master);
+  o.start(t0); o.stop(t0 + 0.5);
+}
+
+function burst() {
+  for (let i = 0; i < 12; i++) {
+    const c = document.createElement('div');
+    c.className = 'confetti';
+    c.textContent = ['⭐','✨','🎉'][i % 3];
+    c.style.left = (40 + Math.random() * 20) + 'vw';
+    c.style.animationDuration = (1.4 + Math.random()) + 's';
+    document.body.appendChild(c);
+    setTimeout(() => c.remove(), 3000);
+  }
+}
+
+// ---------- round logic ----------
+
+function nextTarget() {
+  let pick;
+  do { pick = TARGETS[Math.floor(Math.random() * TARGETS.length)]; } while (pick.key === targetKey && TARGETS.length > 1);
+  targetKey = pick.key;
+  targetEl.style.backgroundColor = toCss(ryBlend(pick.combo.r, pick.combo.y, pick.combo.b));
+  resetBowl();
+  statusEl.textContent = 'Tap the colors to mix them in the bowl!';
+}
+
+function resetBowl() {
+  active = { r: false, y: false, b: false };
+  updateBowl();
+}
+
+function updateBowl() {
+  bowl.style.backgroundColor = toCss(ryBlend(active.r, active.y, active.b));
+  [...blobsEl.children].forEach(el => el.classList.toggle('active', active[el.dataset.c]));
+}
+
+function checkMatch() {
+  const target = TARGETS.find(t => t.key === targetKey).combo;
+  if (active.r === target.r && active.y === target.y && active.b === target.b) {
+    score++; streak++;
+    $('#score').textContent = score; $('#streak').textContent = streak;
+    statusEl.textContent = 'Yes! 🎉';
+    playDing(true); burst();
+    setTimeout(nextTarget, 1300);
+  }
+}
+
+function toggle(c) {
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  active[c] = !active[c];
+  updateBowl();
+  checkMatch();
+}
+
+const BLOB_COLORS = {
+  r: toCss(ryBlend(true, false, false)),
+  y: toCss(ryBlend(false, true, false)),
+  b: toCss(ryBlend(false, false, true)),
+};
+['r', 'y', 'b'].forEach(c => {
+  const el = document.createElement('div');
+  el.className = 'blob';
+  el.dataset.c = c;
+  el.style.backgroundColor = BLOB_COLORS[c];
+  el.onclick = () => toggle(c);
+  blobsEl.appendChild(el);
+});
+
+$('#resetBtn').onclick = () => { resetBowl(); statusEl.textContent = 'Tap the colors to mix them in the bowl!'; };
+
+audioCtx = new AudioContext();
+master = audioCtx.createGain(); master.gain.value = 0.9; master.connect(audioCtx.destination);
+nextTarget();
+</script>
+</body>
+</html>
