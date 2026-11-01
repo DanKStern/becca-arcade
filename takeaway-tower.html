@@ -15,7 +15,12 @@
   a.back { position: absolute; top: 16px; left: 16px; color: #fff; text-decoration: none; font-weight: 700; font-size: 16px; }
   h1 { margin: 6px 0 0; font-size: 36px; text-shadow: 0 3px 0 rgba(0,0,0,0.15); }
   #status { font-size: 19px; min-height: 26px; font-weight: 600; }
-  .bar { display: flex; gap: 18px; font-weight: 700; font-size: 18px; }
+  .bar { display: flex; gap: 14px; font-weight: 700; font-size: 18px; flex-wrap: wrap; align-items: center; justify-content: center; }
+  .bar button {
+    font: inherit; font-weight: 700; font-size: 15px; color: #fff; background: rgba(255,255,255,0.22);
+    border: 3px solid rgba(255,255,255,0.55); border-radius: 14px; padding: 8px 16px; cursor: pointer;
+  }
+  .bar button.active { background: rgba(255,255,255,0.55); }
   .stage {
     width: min(460px, 94vw); background: rgba(255,255,255,0.14); border: 4px solid rgba(255,255,255,0.5);
     border-radius: 24px; padding: 22px; display: flex; flex-direction: column; align-items: center; gap: 18px;
@@ -30,6 +35,17 @@
     transition: transform 0.3s ease, opacity 0.3s ease;
   }
   .block.gone { transform: scale(0.2); opacity: 0; }
+  #tower1000 {
+    display: none; grid-template-columns: repeat(5, 1fr); gap: 6px;
+    width: min(380px, 90vw);
+  }
+  #tower1000 .flat {
+    display: grid; grid-template-columns: repeat(10, 1fr); gap: 1px; aspect-ratio: 1;
+    border: 2px solid rgba(255,255,255,0.5); border-radius: 6px; padding: 2px;
+    transition: transform 0.3s ease, opacity 0.3s ease;
+  }
+  #tower1000 .flat.gone { transform: scale(0.2); opacity: 0; }
+  #tower1000 .block { border-radius: 1px; box-shadow: none; }
   .choices { display: flex; gap: 14px; width: 100%; justify-content: center; }
   .choice {
     font: inherit; font-weight: 800; font-size: 26px; color: #333; background: #fff;
@@ -60,27 +76,32 @@
   <a class="back" href="index.html">← Arcade</a>
   <h1>🧱 Takeaway Tower</h1>
   <div id="status">Press Start to see the tower of 100.</div>
-  <div class="bar"><span>⭐ Score: <span id="score">0</span></span><span>🔥 Streak: <span id="streak">0</span></span></div>
+  <div class="bar">
+    <button id="s100Btn" class="active">💯 100s</button>
+    <button id="s1000Btn">🧱 1000s</button>
+    <span>⭐ Score: <span id="score">0</span></span><span>🔥 Streak: <span id="streak">0</span></span>
+  </div>
 
   <div class="stage" id="stage" style="display:none">
     <div id="prompt"></div>
     <div id="tower"></div>
+    <div id="tower1000"></div>
     <div class="choices" id="choices"></div>
   </div>
 
   <div id="overlay">
     <div class="box">
       <h2>Ready?</h2>
-      <div>Start with a tower of 100 blocks. Pick how many are left after taking some away — watch the tower shrink to check!</div>
+      <div>Start with a tower of 100 blocks. Pick how many are left after taking some away — watch the tower shrink to check! Switch to 💯 100s / 🧱 1000s anytime with the buttons above.</div>
       <button id="startBtn">🧱 Start</button>
     </div>
   </div>
 
 <script>
 const $ = s => document.querySelector(s);
-const stage = $('#stage'), promptEl = $('#prompt'), choicesEl = $('#choices'), towerEl = $('#tower');
+const stage = $('#stage'), promptEl = $('#prompt'), choicesEl = $('#choices'), towerEl = $('#tower'), tower1000El = $('#tower1000');
 const overlay = $('#overlay'), statusEl = $('#status');
-let score = 0, streak = 0, audioCtx, master, busy = false;
+let score = 0, streak = 0, audioCtx, master, busy = false, scale = 100;
 
 function playDing(ok) {
   const t0 = audioCtx.currentTime + 0.02;
@@ -99,33 +120,81 @@ function shuffle(a) {
 }
 
 function buildTower() {
-  towerEl.innerHTML = '';
-  for (let i = 0; i < 100; i++) {
-    const b = document.createElement('div');
-    b.className = 'block';
-    towerEl.appendChild(b);
+  if (scale === 100) {
+    towerEl.style.display = ''; tower1000El.style.display = 'none';
+    towerEl.innerHTML = '';
+    for (let i = 0; i < 100; i++) {
+      const b = document.createElement('div');
+      b.className = 'block';
+      towerEl.appendChild(b);
+    }
+  } else {
+    towerEl.style.display = 'none'; tower1000El.style.display = 'grid';
+    tower1000El.innerHTML = '';
+    for (let f = 0; f < 10; f++) {
+      const flat = document.createElement('div');
+      flat.className = 'flat';
+      for (let i = 0; i < 100; i++) {
+        const b = document.createElement('div');
+        b.className = 'block';
+        flat.appendChild(b);
+      }
+      tower1000El.appendChild(flat);
+    }
   }
 }
 
 function removeBlocks(x) {
-  const blocks = [...towerEl.children];
-  for (let k = 0; k < x; k++) {
-    const idx = 99 - k;
-    setTimeout(() => blocks[idx].classList.add('gone'), k * 16);
+  if (scale === 100) {
+    const blocks = [...towerEl.children];
+    for (let k = 0; k < x; k++) {
+      const idx = 99 - k;
+      setTimeout(() => blocks[idx].classList.add('gone'), k * 16);
+    }
+  } else {
+    const flats = [...tower1000El.children];
+    const fullFlats = Math.floor(x / 100);
+    const remainder = x % 100;
+    for (let k = 0; k < fullFlats; k++) {
+      const idx = 9 - k;
+      setTimeout(() => flats[idx].classList.add('gone'), k * 150);
+    }
+    if (remainder > 0) {
+      const flatIdx = 9 - fullFlats;
+      const blocks = [...flats[flatIdx].children];
+      const baseDelay = fullFlats * 150;
+      for (let k = 0; k < remainder; k++) {
+        const idx = 99 - k;
+        setTimeout(() => blocks[idx].classList.add('gone'), baseDelay + k * 16);
+      }
+    }
   }
 }
 
+function removalDuration(x) {
+  if (scale === 100) return x * 16 + 300;
+  const fullFlats = Math.floor(x / 100), remainder = x % 100;
+  const flatsEnd = fullFlats > 0 ? (fullFlats - 1) * 150 + 300 : 0;
+  const remEnd = remainder > 0 ? fullFlats * 150 + (remainder - 1) * 16 + 300 : 0;
+  return Math.max(flatsEnd, remEnd);
+}
+
+const DELTAS = {
+  100: [-11, -10, -9, -1, 1, 9, 10, 11],
+  1000: [-110, -101, -100, -99, -11, -10, -9, -1, 1, 9, 10, 11, 99, 100, 101, 110],
+};
+
 function makeDecoys(correct) {
   const used = new Set([correct]);
-  const deltas = shuffle([-11, -10, -9, -1, 1, 9, 10, 11]);
+  const deltas = shuffle(DELTAS[scale].slice());
   const decoys = [];
   for (const d of deltas) {
     const v = correct + d;
-    if (v >= 1 && v <= 99 && !used.has(v)) { used.add(v); decoys.push(v); }
+    if (v >= 1 && v <= scale - 1 && !used.has(v)) { used.add(v); decoys.push(v); }
     if (decoys.length === 2) break;
   }
   while (decoys.length < 2) {
-    const v = 1 + Math.floor(Math.random() * 99);
+    const v = 1 + Math.floor(Math.random() * (scale - 1));
     if (!used.has(v)) { used.add(v); decoys.push(v); }
   }
   return decoys;
@@ -133,10 +202,12 @@ function makeDecoys(correct) {
 
 function nextRound() {
   busy = false;
-  const x = 11 + Math.floor(Math.random() * 79); // 11..89
-  const correct = 100 - x;
+  const x = scale === 100
+    ? 11 + Math.floor(Math.random() * 79)    // 11..89
+    : 11 + Math.floor(Math.random() * 979);  // 11..989
+  const correct = scale - x;
   buildTower();
-  promptEl.textContent = `100 − ${x} = ?`;
+  promptEl.textContent = `${scale} − ${x} = ?`;
   const choices = shuffle([correct, ...makeDecoys(correct)]);
   choicesEl.innerHTML = '';
   choices.forEach(val => {
@@ -150,6 +221,15 @@ function nextRound() {
   statusEl.textContent = '';
 }
 
+function setScale(s) {
+  scale = s;
+  $('#s100Btn').classList.toggle('active', s === 100);
+  $('#s1000Btn').classList.toggle('active', s === 1000);
+  if (audioCtx) nextRound();
+}
+$('#s100Btn').onclick = () => setScale(100);
+$('#s1000Btn').onclick = () => setScale(1000);
+
 function choose(el, val, correct, x) {
   if (busy) return;
   busy = true;
@@ -162,8 +242,8 @@ function choose(el, val, correct, x) {
   removeBlocks(x);
   if (ok) { score++; streak++; burst(); } else { streak = 0; }
   $('#score').textContent = score; $('#streak').textContent = streak;
-  statusEl.textContent = ok ? 'Yes! 🎉' : `100 − ${x} = ${correct}`;
-  setTimeout(nextRound, 2000);
+  statusEl.textContent = ok ? 'Yes! 🎉' : `${scale} − ${x} = ${correct}`;
+  setTimeout(nextRound, Math.max(1500, removalDuration(x) + 500));
 }
 
 function burst() {

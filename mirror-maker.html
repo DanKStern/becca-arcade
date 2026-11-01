@@ -44,6 +44,8 @@
   <div class="bar">
     <button id="sideBtn" class="active">↔ Side-to-Side</button>
     <button id="fourBtn">✛ 4-Way</button>
+    <button id="diag1Btn">↘ Diagonal</button>
+    <button id="diag2Btn">↙ Diagonal</button>
     <button id="bigBtn" class="active">🖌️ Big</button>
     <button id="smallBtn">🖊️ Small</button>
     <button id="clearBtn">🧹 Clear</button>
@@ -64,7 +66,7 @@ const wrap = $('.canvasWrap'), bg = $('#bg'), fg = $('#fg');
 const bgCtx = bg.getContext('2d'), fgCtx = fg.getContext('2d');
 
 const COLORS = ['#ff5a5a','#ff9a4a','#ffd34f','#5fcf6a','#4fd1ff','#4f7cff','#7c6bff','#ff6fb0'];
-let mode = 'side';     // 'side' | 'four'
+let mode = 'side';     // 'side' | 'four' | 'diag1' | 'diag2'
 let brush = 16;        // px
 let color = COLORS[5];
 let drawing = false, lastX = 0, lastY = 0;
@@ -88,9 +90,17 @@ function drawGuides() {
   bgCtx.strokeStyle = 'rgba(124,107,255,0.25)';
   bgCtx.lineWidth = Math.max(2, w * 0.004);
   bgCtx.setLineDash([w * 0.015, w * 0.012]);
-  bgCtx.beginPath(); bgCtx.moveTo(cx, 0); bgCtx.lineTo(cx, h); bgCtx.stroke();
+  if (mode === 'side' || mode === 'four') {
+    bgCtx.beginPath(); bgCtx.moveTo(cx, 0); bgCtx.lineTo(cx, h); bgCtx.stroke();
+  }
   if (mode === 'four') {
     bgCtx.beginPath(); bgCtx.moveTo(0, cy); bgCtx.lineTo(w, cy); bgCtx.stroke();
+  }
+  if (mode === 'diag1') {
+    bgCtx.beginPath(); bgCtx.moveTo(0, 0); bgCtx.lineTo(w, h); bgCtx.stroke();
+  }
+  if (mode === 'diag2') {
+    bgCtx.beginPath(); bgCtx.moveTo(w, 0); bgCtx.lineTo(0, h); bgCtx.stroke();
   }
   bgCtx.setLineDash([]);
 }
@@ -98,7 +108,10 @@ function drawGuides() {
 function mirrorPoints(x, y) {
   const mx = cx * 2 - x, my = cy * 2 - y;
   if (mode === 'side') return [[x, y], [mx, y]];
-  return [[x, y], [mx, y], [x, my], [mx, my]];
+  if (mode === 'four') return [[x, y], [mx, y], [x, my], [mx, my]];
+  if (mode === 'diag1') return [[x, y], [y, x]];
+  if (mode === 'diag2') return [[x, y], [w - y, w - x]];
+  return [[x, y]];
 }
 
 function strokeAt(fromX, fromY, toX, toY) {
@@ -146,11 +159,15 @@ function setMode(m) {
   mode = m;
   $('#sideBtn').classList.toggle('active', m === 'side');
   $('#fourBtn').classList.toggle('active', m === 'four');
+  $('#diag1Btn').classList.toggle('active', m === 'diag1');
+  $('#diag2Btn').classList.toggle('active', m === 'diag2');
   fgCtx.clearRect(0, 0, w, h);
   drawGuides();
 }
 $('#sideBtn').onclick = () => setMode('side');
 $('#fourBtn').onclick = () => setMode('four');
+$('#diag1Btn').onclick = () => setMode('diag1');
+$('#diag2Btn').onclick = () => setMode('diag2');
 
 $('#bigBtn').onclick = () => { brush = 16; $('#bigBtn').classList.add('active'); $('#smallBtn').classList.remove('active'); };
 $('#smallBtn').onclick = () => { brush = 7; $('#smallBtn').classList.add('active'); $('#bigBtn').classList.remove('active'); };
