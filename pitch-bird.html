@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pitch Bird — Becca's Arcade</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; padding: 20px; display: flex; flex-direction: column;
+    align-items: center; gap: 12px; font: 18px/1.4 system-ui, "Segoe UI", sans-serif;
+    background: linear-gradient(135deg, #7c6bff, #ff6fb0 60%, #ffd34f);
+    color: #fff; text-align: center;
+  }
+  a.back { position: absolute; top: 16px; left: 16px; color: #fff; text-decoration: none; font-weight: 700; font-size: 16px; }
+  h1 { margin: 6px 0 0; font-size: 36px; text-shadow: 0 3px 0 rgba(0,0,0,0.15); }
+  #status { font-size: 18px; min-height: 26px; }
+  .wrap { position: relative; width: min(520px, 94vw); }
+  canvas {
+    display: block; width: 100%; aspect-ratio: 3/4; background: #8fd8ff;
+    border-radius: 18px; border: 5px solid rgba(255,255,255,0.7); touch-action: none;
+  }
+  #overlay {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.45); border-radius: 18px; flex-direction: column; gap: 14px; text-align: center;
+  }
+  #overlay.hide { display: none; }
+  #overlay .box {
+    background: rgba(255,255,255,0.18); border: 4px solid rgba(255,255,255,0.6); border-radius: 22px;
+    padding: 24px 30px; max-width: 86%;
+  }
+  #overlay h2 { font-size: 32px; margin: 0 0 6px; }
+  #overlay button {
+    font: inherit; font-weight: 700; font-size: 20px; color: #333; background: #fff;
+    border: none; border-radius: 16px; padding: 12px 26px; cursor: pointer; margin-top: 10px;
+  }
+  .note { font-size: 14px; opacity: 0.85; max-width: 480px; margin-top: 4px; }
+</style>
+</head>
+<body>
+  <a class="back" href="index.html">← Arcade</a>
+  <h1>🐦 Pitch Bird</h1>
+  <div id="status">Sing high to fly up, sing low to dive down!</div>
+  <div class="wrap">
+    <canvas id="c"></canvas>
+    <div id="overlay">
+      <div class="box">
+        <h2 id="ovTitle">Ready?</h2>
+        <div id="ovBody">Press Start and let her sing or hum into the mic.</div>
+        <button id="ovBtn">🎤 Start</button>
+      </div>
+    </div>
+  </div>
+  <div class="note">Nothing is recorded or uploaded — the microphone is only used live, right here. Add <code>?test</code> to the address to run a demo tone instead of the mic.</div>
+
+<script>
+const TEST = new URLSearchParams(location.search).has('test');
+const MIN_HZ = 130, MAX_HZ = 900;      // mapped range of singing pitch -> screen height
+const GRAVITY = 2.2;                    // px/frame drift down when no voice detected
+const FOLLOW = 0.16;                    // how fast the bird chases a detected pitch
+const BIRD_X_FRAC = 0.22;
+const BIRD_R = 20;
+const PIPE_W = 70;
+const GAP_H = 230;                      // generous gap, forgiving for little kids
+const PIPE_SPACING = 300;
+const SPEED = 2.4;
+
+const $ = s => document.querySelector(s);
+const canvas = $('#c'), ctx = canvas.getContext('2d');
+const overlay = $('#overlay'), ovTitle = $('#ovTitle'), ovBody = $('#ovBody'), ovBtn = $('#ovBtn');
+const statusEl = $('#status');
+
+let audioCtx, analyser, buf;
+let running = false, started = false;
+let birdY = 0, targetHz = null, lastGoodHz = null;
+let pipes = [], score = 0, lastPipeX = 0;
+let w = 0, h = 0;
+
+function fit() {
+  const r = canvas.getBoundingClientRect(), d = devicePixelRatio || 1;
+  const cw = Math.round(r.width * d), ch = Math.round(r.height * d);
+  if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; }
+  w = canvas.width; h = canvas.height;
+}
+
+// ---------- audio ----------
+
+async function startAudio() {
+  audioCtx = new AudioContext();
+  let source;
+  if (TEST) {
+    source = makeTestSource();
+  } else {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+    });
+    source = audioCtx.createMediaStreamSource(stream);
+  }
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 1024;
+  buf = new Float32Array(analyser.fftSize);
+  source.connect(analyser);
+}
+
+function makeTestSource() {
+  // A tone that glides up and down on its own, so the game can be tried without a microphone.
+  const out = audioCtx.createGain(); out.gain.value = 0.3;
+  const osc = audioCtx.createOscillator(); osc.frequency.value = 400;
+  const lfo = audioCtx.createOscillator(); lfo.frequency.value = 0.15;
+  const lfoAmt = audioCtx.createGain(); lfoAmt.gain.value = 250;
+  lfo.connect(lfoAmt); lfoAmt.connect(osc.frequency); lfo.start();
+  osc.connect(out); osc.start();
+  return out;
+}
+
+function detectPitch() {
+  analyser.getFloatTimeDomainData(buf);
+  const SIZE = buf.length;
+  let rms = 0;
+  for (let i = 0; i < SIZE; i++) rms += buf[i] * buf[i];
+  rms = Math.sqrt(rms / SIZE);
+  if (rms < 0.02) return -1;
+
+  const sr = audioCtx.sampleRate;
+  const corrSize = Math.floor(SIZE / 2);
+  const minOffset = Math.max(2, Math.floor(sr / MAX_HZ));
+  const maxOffset = Math.min(corrSize - 1, Math.ceil(sr / MIN_HZ));
+  let bestOffset = -1, bestCorr = 0;
+  for (let offset = minOffset; offset <= maxOffset; offset++) {
+    let corr = 0;
+    for (let i = 0; i < corrSize; i++) corr += Math.abs(buf[i] - buf[i + offset]);
+    corr = 1 - corr / corrSize;
+    if (corr > bestCorr) { bestCorr = corr; bestOffset = offset; }
+  }
+  if (bestCorr > 0.82 && bestOffset > 0) return sr / bestOffset;
+  return -1;
+}
+
+function pitchToY(hz) {
+  const lo = Math.log(MIN_HZ), hi = Math.log(MAX_HZ);
+  let t = (Math.log(hz) - lo) / (hi - lo);
+  t = Math.max(0, Math.min(1, t));
+  return h - t * h;
+}
+
+// ---------- game ----------
+
+function resetGame() {
+  birdY = h / 2;
+  pipes = [];
+  score = 0;
+  lastPipeX = w + 100;
+  spawnPipe(lastPipeX);
+}
+
+function spawnPipe(x) {
+  const margin = GAP_H * 0.7;
+  const gapY = margin + Math.random() * (h - 2 * margin);
+  pipes.push({ x, gapY, scored: false });
+  lastPipeX = x;
+}
+
+function update() {
+  const hz = detectPitch();
+  if (hz > 0) {
+    targetHz = hz; lastGoodHz = hz;
+    const ty = pitchToY(hz);
+    birdY += (ty - birdY) * FOLLOW;
+  } else {
+    targetHz = null;
+    birdY += GRAVITY;
+  }
+  birdY = Math.max(BIRD_R, Math.min(h - BIRD_R, birdY));
+
+  for (const p of pipes) p.x -= SPEED * (w / 520);
+  if (pipes.length && pipes[pipes.length - 1].x < w - PIPE_SPACING * (w / 520)) {
+    spawnPipe(w);
+  }
+  pipes = pipes.filter(p => p.x > -PIPE_W * (w / 520) * 2);
+
+  const birdX = w * BIRD_X_FRAC;
+  const r = BIRD_R * (w / 520) * 0.85; // slightly forgiving hitbox
+  const pw = PIPE_W * (w / 520);
+  for (const p of pipes) {
+    if (!p.scored && p.x + pw < birdX) { p.scored = true; score++; }
+    const withinX = p.x < birdX + r && p.x + pw > birdX - r;
+    if (withinX) {
+      const gapTop = p.gapY - GAP_H / 2 * (h / 693);
+      const gapBot = p.gapY + GAP_H / 2 * (h / 693);
+      if (birdY - r < gapTop || birdY + r > gapBot) endGame();
+    }
+  }
+  if (birdY - r <= 0 || birdY + r >= h) endGame();
+}
+
+function endGame() {
+  if (!running) return;
+  running = false;
+  ovTitle.textContent = 'Game Over!';
+  ovBody.innerHTML = `Score: <b>${score}</b>`;
+  ovBtn.textContent = '🐦 Play Again';
+  overlay.classList.remove('hide');
+}
+
+// ---------- drawing ----------
+
+function drawBackground() {
+  ctx.fillStyle = '#8fd8ff'; ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = 'rgba(255,255,255,0.65)';
+  const cloudY = [h * 0.15, h * 0.45, h * 0.75];
+  const t = performance.now() / 1000;
+  cloudY.forEach((cy, i) => {
+    const cx = ((t * 20 + i * 180) % (w + 160)) - 80;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, 44, 20, 0, 0, Math.PI * 2);
+    ctx.ellipse(cx + 30, cy + 6, 32, 16, 0, 0, Math.PI * 2);
+    ctx.fill();
+  });
+}
+
+function drawPipes() {
+  const pw = PIPE_W * (w / 520);
+  pipes.forEach(p => {
+    const gapTop = p.gapY - GAP_H / 2 * (h / 693);
+    const gapBot = p.gapY + GAP_H / 2 * (h / 693);
+    ctx.fillStyle = '#5fcf6a'; ctx.strokeStyle = '#3f9e4a'; ctx.lineWidth = 4;
+    ctx.fillRect(p.x, 0, pw, gapTop); ctx.strokeRect(p.x, 0, pw, gapTop);
+    ctx.fillRect(p.x, gapBot, pw, h - gapBot); ctx.strokeRect(p.x, gapBot, pw, h - gapBot);
+  });
+}
+
+function drawBird() {
+  const birdX = w * BIRD_X_FRAC;
+  const r = BIRD_R * (w / 520);
+  ctx.save();
+  ctx.translate(birdX, birdY);
+  ctx.font = `${r * 2.6}px system-ui, sans-serif`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('🐦', 0, 0);
+  ctx.restore();
+}
+
+function drawPitchMeter() {
+  // thin bar on the right edge showing the detected pitch height, mostly useful while calibrating.
+  const bx = w - 14, bw = 8;
+  ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.fillRect(bx, 0, bw, h);
+  if (lastGoodHz) {
+    const y = pitchToY(lastGoodHz);
+    ctx.fillStyle = targetHz ? '#ffe34f' : 'rgba(255,227,79,0.4)';
+    ctx.fillRect(bx - 3, y - 4, bw + 6, 8);
+  }
+}
+
+function drawScore() {
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.font = `bold ${Math.round(h * 0.07)}px system-ui, sans-serif`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  ctx.fillText(score, w / 2, h * 0.03);
+}
+
+function frame() {
+  fit();
+  if (started) {
+    if (running) update();
+    drawBackground(); drawPipes(); drawBird(); drawPitchMeter(); drawScore();
+  }
+  requestAnimationFrame(frame);
+}
+
+// ---------- start / restart ----------
+
+ovBtn.onclick = async () => {
+  if (!started) {
+    ovBtn.disabled = true;
+    try {
+      await startAudio();
+      started = true;
+      statusEl.textContent = TEST ? 'Demo tone flying on its own — try the real mic by removing ?test.' : 'Listening! Sing or hum — higher pitch flies up.';
+      overlay.classList.add('hide');
+      resetGame();
+      running = true;
+    } catch (err) {
+      ovBody.textContent = "Couldn't reach the microphone: " + err.message;
+      ovBtn.disabled = false;
+      return;
+    }
+    ovBtn.disabled = false;
+  } else {
+    overlay.classList.add('hide');
+    resetGame();
+    running = true;
+  }
+};
+
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
