@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Takeaway Tower — Becca's Arcade</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; padding: 20px; display: flex; flex-direction: column;
+    align-items: center; gap: 14px; font: 18px/1.4 system-ui, "Segoe UI", sans-serif;
+    background: linear-gradient(135deg, #4fd1ff, #4f7cff 55%, #7c6bff);
+    color: #fff; text-align: center; overflow-x: hidden;
+  }
+  a.back { position: absolute; top: 16px; left: 16px; color: #fff; text-decoration: none; font-weight: 700; font-size: 16px; }
+  h1 { margin: 6px 0 0; font-size: 36px; text-shadow: 0 3px 0 rgba(0,0,0,0.15); }
+  #status { font-size: 19px; min-height: 26px; font-weight: 600; }
+  .bar { display: flex; gap: 18px; font-weight: 700; font-size: 18px; }
+  .stage {
+    width: min(460px, 94vw); background: rgba(255,255,255,0.14); border: 4px solid rgba(255,255,255,0.5);
+    border-radius: 24px; padding: 22px; display: flex; flex-direction: column; align-items: center; gap: 18px;
+  }
+  #prompt { font-size: 30px; font-weight: 800; }
+  #tower {
+    display: grid; grid-template-columns: repeat(10, 1fr); gap: 3px;
+    width: min(320px, 80vw); aspect-ratio: 1;
+  }
+  .block {
+    background: #ffd34f; border-radius: 4px; box-shadow: 0 2px 0 rgba(0,0,0,0.2);
+    transition: transform 0.3s ease, opacity 0.3s ease;
+  }
+  .block.gone { transform: scale(0.2); opacity: 0; }
+  .choices { display: flex; gap: 14px; width: 100%; justify-content: center; }
+  .choice {
+    font: inherit; font-weight: 800; font-size: 26px; color: #333; background: #fff;
+    border: 5px solid rgba(255,255,255,0); border-radius: 18px; cursor: pointer;
+    padding: 14px 10px; flex: 1; box-shadow: 0 6px 0 rgba(0,0,0,0.15); transition: transform 0.1s;
+  }
+  .choice:active { transform: scale(0.96); }
+  .choice.correct { border-color: #5fcf6a; background: #e9ffe9; }
+  .choice.wrong { border-color: #ff5a5a; background: #ffe9e9; }
+  #overlay {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.4); flex-direction: column; gap: 14px;
+  }
+  #overlay.hide { display: none; }
+  #overlay .box {
+    background: rgba(255,255,255,0.15); border: 4px solid rgba(255,255,255,0.6); border-radius: 24px;
+    padding: 28px 36px; text-align: center; max-width: 86%;
+  }
+  #overlay button {
+    font: inherit; font-weight: 700; font-size: 20px; color: #333; background: #fff;
+    border: none; border-radius: 16px; padding: 12px 28px; cursor: pointer; margin-top: 8px;
+  }
+  .confetti { position: fixed; top: -40px; font-size: 28px; animation: fall linear forwards; pointer-events: none; }
+  @keyframes fall { to { transform: translateY(110vh) rotate(360deg); opacity: 0.4; } }
+</style>
+</head>
+<body>
+  <a class="back" href="index.html">← Arcade</a>
+  <h1>🧱 Takeaway Tower</h1>
+  <div id="status">Press Start to see the tower of 100.</div>
+  <div class="bar"><span>⭐ Score: <span id="score">0</span></span><span>🔥 Streak: <span id="streak">0</span></span></div>
+
+  <div class="stage" id="stage" style="display:none">
+    <div id="prompt"></div>
+    <div id="tower"></div>
+    <div class="choices" id="choices"></div>
+  </div>
+
+  <div id="overlay">
+    <div class="box">
+      <h2>Ready?</h2>
+      <div>Start with a tower of 100 blocks. Pick how many are left after taking some away — watch the tower shrink to check!</div>
+      <button id="startBtn">🧱 Start</button>
+    </div>
+  </div>
+
+<script>
+const $ = s => document.querySelector(s);
+const stage = $('#stage'), promptEl = $('#prompt'), choicesEl = $('#choices'), towerEl = $('#tower');
+const overlay = $('#overlay'), statusEl = $('#status');
+let score = 0, streak = 0, audioCtx, master, busy = false;
+
+function playDing(ok) {
+  const t0 = audioCtx.currentTime + 0.02;
+  const o = audioCtx.createOscillator(); o.type = 'sine';
+  o.frequency.value = ok ? 880 : 180;
+  const g = audioCtx.createGain();
+  g.gain.setValueAtTime(0.25, t0);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + (ok ? 0.4 : 0.3));
+  o.connect(g); g.connect(master);
+  o.start(t0); o.stop(t0 + 0.5);
+}
+
+function shuffle(a) {
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+
+function buildTower() {
+  towerEl.innerHTML = '';
+  for (let i = 0; i < 100; i++) {
+    const b = document.createElement('div');
+    b.className = 'block';
+    towerEl.appendChild(b);
+  }
+}
+
+function removeBlocks(x) {
+  const blocks = [...towerEl.children];
+  for (let k = 0; k < x; k++) {
+    const idx = 99 - k;
+    setTimeout(() => blocks[idx].classList.add('gone'), k * 16);
+  }
+}
+
+function makeDecoys(correct) {
+  const used = new Set([correct]);
+  const deltas = shuffle([-11, -10, -9, -1, 1, 9, 10, 11]);
+  const decoys = [];
+  for (const d of deltas) {
+    const v = correct + d;
+    if (v >= 1 && v <= 99 && !used.has(v)) { used.add(v); decoys.push(v); }
+    if (decoys.length === 2) break;
+  }
+  while (decoys.length < 2) {
+    const v = 1 + Math.floor(Math.random() * 99);
+    if (!used.has(v)) { used.add(v); decoys.push(v); }
+  }
+  return decoys;
+}
+
+function nextRound() {
+  busy = false;
+  const x = 11 + Math.floor(Math.random() * 79); // 11..89
+  const correct = 100 - x;
+  buildTower();
+  promptEl.textContent = `100 − ${x} = ?`;
+  const choices = shuffle([correct, ...makeDecoys(correct)]);
+  choicesEl.innerHTML = '';
+  choices.forEach(val => {
+    const el = document.createElement('div');
+    el.className = 'choice';
+    el.textContent = val;
+    el.dataset.val = val;
+    el.onclick = () => choose(el, val, correct, x);
+    choicesEl.appendChild(el);
+  });
+  statusEl.textContent = '';
+}
+
+function choose(el, val, correct, x) {
+  if (busy) return;
+  busy = true;
+  const ok = val === correct;
+  el.classList.add(ok ? 'correct' : 'wrong');
+  if (!ok) {
+    [...choicesEl.children].forEach(c => { if (parseInt(c.dataset.val, 10) === correct) c.classList.add('correct'); });
+  }
+  playDing(ok);
+  removeBlocks(x);
+  if (ok) { score++; streak++; burst(); } else { streak = 0; }
+  $('#score').textContent = score; $('#streak').textContent = streak;
+  statusEl.textContent = ok ? 'Yes! 🎉' : `100 − ${x} = ${correct}`;
+  setTimeout(nextRound, 2000);
+}
+
+function burst() {
+  for (let i = 0; i < 10; i++) {
+    const c = document.createElement('div');
+    c.className = 'confetti';
+    c.textContent = ['⭐','✨','🎉'][i % 3];
+    c.style.left = (40 + Math.random() * 20) + 'vw';
+    c.style.animationDuration = (1.4 + Math.random()) + 's';
+    document.body.appendChild(c);
+    setTimeout(() => c.remove(), 3000);
+  }
+}
+
+$('#startBtn').onclick = () => {
+  audioCtx = new AudioContext();
+  master = audioCtx.createGain(); master.gain.value = 0.9; master.connect(audioCtx.destination);
+  overlay.classList.add('hide');
+  stage.style.display = 'flex';
+  nextRound();
+};
+</script>
+</body>
+</html>

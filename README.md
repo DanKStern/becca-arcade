@@ -3,6 +3,8 @@
 A tiny arcade of browser games, built in an afternoon. `index.html` is the menu; each game is its own static page, no build step, no frameworks.
 
 - **Pitch Bird** (`pitch-bird.html`) — sing higher to fly up, lower to dive down, dodge the pipes. Uses the Web Audio API to detect pitch live from the microphone (autocorrelation) and maps it to the bird's height. Nothing is recorded or uploaded. Add `?test` to the address to fly a demo tone instead of using the mic.
-- **Memory Match** (`memory-match.html`) — classic flip-two-cards matching game, Easy (12 cards) or Hard (16 cards).
+- **Memory Match** (`memory-match.html`) — classic flip-two-cards matching game, Easy (20 cards) or Hard (30 cards).
+- **Sound Match** (`sound-match.html`) — match a sound (flute, triangle buzz, square buzz, water drip, all synthesized live) to its oscilloscope-style picture, or the other way around. Alternates direction each round.
+- **Takeaway Tower** (`takeaway-tower.html`) — pick the answer to "100 − X", then watch a 100-block tower shrink to check: full ten-rows disappear first, then the leftover ones, so regrouping is visible rather than abstract.
 
-Run it by opening `index.html` in Chrome, or serve the folder (`python -m http.server`) and open `http://localhost:8000`.
+Run it by opening `index.html` in Chrome, or serve the folder (`python -m http.server`) and open `http://localhost:8000`. Pitch Bird specifically needs the `http://` serving — Chrome blocks microphone access from a bare `file://` page.
