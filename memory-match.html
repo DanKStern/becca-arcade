@@ -64,8 +64,8 @@
   <a class="back" href="index.html">← Arcade</a>
   <h1>🧠 Memory Match</h1>
   <div class="bar">
-    <button id="easyBtn" class="active">Easy (12)</button>
-    <button id="hardBtn">Hard (16)</button>
+    <button id="easyBtn" class="active">Easy (20)</button>
+    <button id="hardBtn">Hard (30)</button>
     <span id="stats">Matches: 0/0 · Moves: 0</span>
   </div>
   <div id="grid"></div>
@@ -79,7 +79,7 @@
   </div>
 
 <script>
-const ALL_EMOJI = ['🐶','🐱','🦁','🐸','🐵','🦋','🐠','🦄','🐢','🐘','🦊','🐧'];
+const ALL_EMOJI = ['🐶','🐱','🦁','🐸','🐵','🦋','🐠','🦄','🐢','🐘','🦊','🐧','🐻','🐼','🐷','🦓'];
 const $ = s => document.querySelector(s);
 const grid = $('#grid'), stats = $('#stats'), overlay = $('#overlay');
 
@@ -95,7 +95,7 @@ function shuffle(a) {
 
 function setup(pairCount) {
   overlay.classList.remove('show');
-  cols = pairCount === 6 ? 4 : 4; // keep 4 columns for both sizes
+  cols = pairCount === 10 ? 4 : 5; // 20 cards -> 4x5, 30 cards -> 5x6
   const rows = (pairCount * 2) / cols;
   grid.style.setProperty('--cols', cols);
   const picks = shuffle(ALL_EMOJI.slice()).slice(0, pairCount);
@@ -165,11 +165,11 @@ function win() {
   }
 }
 
-$('#easyBtn').onclick = () => { $('#easyBtn').classList.add('active'); $('#hardBtn').classList.remove('active'); setup(6); };
-$('#hardBtn').onclick = () => { $('#hardBtn').classList.add('active'); $('#easyBtn').classList.remove('active'); setup(8); };
-$('#againBtn').onclick = () => setup($('#hardBtn').classList.contains('active') ? 8 : 6);
+$('#easyBtn').onclick = () => { $('#easyBtn').classList.add('active'); $('#hardBtn').classList.remove('active'); setup(10); };
+$('#hardBtn').onclick = () => { $('#hardBtn').classList.add('active'); $('#easyBtn').classList.remove('active'); setup(15); };
+$('#againBtn').onclick = () => setup($('#hardBtn').classList.contains('active') ? 15 : 10);
 
-setup(6);
+setup(10);
 </script>
 </body>
 </html>
